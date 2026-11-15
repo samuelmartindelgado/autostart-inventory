@@ -92,18 +92,19 @@ foreach ($source in $sources) {
 # ---------------------------------------------------------------------------
 
 $hiddenMicrosoft = 0
-$hiddenMarked = 0
 $visible = New-Object System.Collections.Generic.List[object]
 
+# Firmantes exactos de Microsoft (no basta con que el nombre "contenga" Microsoft).
+$microsoftSigners = @('Microsoft Windows', 'Microsoft Corporation', 'Microsoft Windows Publisher')
+
 foreach ($entry in $allEntries) {
-    $isMicrosoft = ($entry.Firma -eq 'Firmado' -and [string]$entry.Firmante -match 'Microsoft')
+    $isMicrosoft = ($entry.Firma -eq 'Firmado' -and $microsoftSigners -contains [string]$entry.Firmante)
     $hasMarks = -not [string]::IsNullOrWhiteSpace([string]$entry.Marcas)
 
-    if (-not $IncludeMicrosoft -and $isMicrosoft) {
+    # Solo se oculta lo de Microsoft SIN marcas: un powershell.exe o rundll32.exe
+    # firmado por Microsoft que lanza otra cosa se muestra siempre.
+    if (-not $IncludeMicrosoft -and $isMicrosoft -and -not $hasMarks) {
         $hiddenMicrosoft++
-        if ($hasMarks) {
-            $hiddenMarked++
-        }
         continue
     }
 
@@ -133,7 +134,20 @@ try {
 
     if ($visibleArray.Count -gt 0) {
         $json = ConvertTo-Json -InputObject $visibleArray -Depth 4
-        $visibleArray | Export-Csv -LiteralPath $csvPath -NoTypeInformation -Encoding UTF8 -ErrorAction Stop
+        # Evita que Excel interprete como fórmula un texto que empiece por = + - @
+        # (un nombre de entrada lo controla quien la creó).
+        $csvRows = foreach ($row in $visibleArray) {
+            $copy = [ordered]@{}
+            foreach ($property in $row.PSObject.Properties) {
+                $value = [string]$property.Value
+                if ($value -match '^[=+\-@\t\r]') {
+                    $value = "'" + $value
+                }
+                $copy[$property.Name] = $value
+            }
+            [pscustomobject]$copy
+        }
+        $csvRows | Export-Csv -LiteralPath $csvPath -NoTypeInformation -Encoding UTF8 -ErrorAction Stop
     }
     else {
         $json = '[]'
@@ -161,9 +175,6 @@ if ($hiddenMicrosoft -gt 0) {
     Write-Host ('Ocultas por firma de Microsoft: {0} (use -IncludeMicrosoft para verlas)' -f $hiddenMicrosoft) -ForegroundColor DarkGray
 }
 
-if ($hiddenMarked -gt 0) {
-    Write-Host ('De ellas, {0} con marcas: use -IncludeMicrosoft para revisarlas.' -f $hiddenMarked) -ForegroundColor Yellow
-}
 
 foreach ($note in $notes) {
     Write-Host ('Aviso: {0}' -f $note) -ForegroundColor Yellow
